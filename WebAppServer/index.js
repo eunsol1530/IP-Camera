@@ -6,6 +6,8 @@ const port = 3000;
 
 const fs = require('fs');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const connection = mysql.createConnection({
     'host': 'localhost',
@@ -16,6 +18,14 @@ const connection = mysql.createConnection({
 
 app.use(express.json());
 app.use(cors());
+app.use(helmet());
+
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100 // limit each IP to 100 requests per windowMs
+});
+
+app.use(limiter);
 
 app.post('/register', async function (req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*')
@@ -25,14 +35,14 @@ app.post('/register', async function (req, res) {
         return
     }
 
-    const username = mysql.escape(req.body.username);
+    const username = req.body.username;
     const password = req.body.password;
 
-    const hashPassword = mysql.escape(await bcrypt.hash(password, 10));
+    const hashPassword = await bcrypt.hash(password, 10);
 
-    const sql = "INSERT INTO user (username, password) VALUES (" + username + "," + hashPassword + ")";
+    const sql = "INSERT INTO user (username, password) VALUES (?, ?)";
 
-    connection.query(sql, function (err, sqlRes) {
+    connection.query(sql, [username, hashPassword], function (err, sqlRes) {
         if (err == null) {
             res.sendStatus(201);
         } else {
@@ -63,10 +73,11 @@ app.post('/screenshot', async (req, res) => {
         return;
     }
 
-    const username = mysql.escape(getUsernameFromAuth(req));
+    const username = getUsernameFromAuth(req);
 
-    fs.mkdir(username, function () {
-        const stream = fs.createWriteStream(username + '/' + Date.now().toString() + '.jpeg')
+    const safePath = `uploads/${username}`;
+    fs.mkdir(safePath, { recursive: true }, function () {
+        const stream = fs.createWriteStream(`${safePath}/${Date.now().toString()}.jpeg`)
         stream.write(new Uint8Array(req.body))
     });
 
@@ -81,9 +92,10 @@ app.get('/gallery', async (req, res) => {
         return;
     }
 
-    const username = mysql.escape(getUsernameFromAuth(req));
+    const username = getUsernameFromAuth(req);
 
-    fs.readdir(username, (err, files) => {
+    const safePath = `uploads/${username}`;
+    fs.readdir(safePath, (err, files) => {
         if (err) {
             res.sendStatus(404);
             return
@@ -92,7 +104,7 @@ app.get('/gallery', async (req, res) => {
         const arr = [];
 
         files.forEach(file => {
-            const data = fs.readFileSync(username + '/' + file)
+            const data = fs.readFileSync(`${safePath}/${file}`)
             arr.push([...data]);
         });
 
@@ -114,8 +126,7 @@ async function isAuthorized(req) {
             return
         }
 
-        login = mysql.escape(login);
-        connection.query('select password from user where username = ' + login, async function (err, res) {
+        connection.query('select password from user where username = ?', [login], async function (err, res) {
             if (err == null) {
                 const dbPassword = res[0].password;
 
