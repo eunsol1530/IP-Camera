@@ -6,6 +6,7 @@ const port = 3000;
 
 const fs = require('fs');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 
 const connection = mysql.createConnection({
     'host': 'localhost',
@@ -16,6 +17,13 @@ const connection = mysql.createConnection({
 
 app.use(express.json());
 app.use(cors());
+
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100 // limit each IP to 100 requests per windowMs
+});
+
+app.use(limiter);
 
 app.post('/register', async function (req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*')
